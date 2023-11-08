@@ -23,11 +23,11 @@ parser.add_argument('--dataset', type=str, default='Cora',
                     help='Dataset name')
 parser.add_argument('--ratio', type=float, default=0.1, help='The ratio of testing edges dropped.')
 parser.add_argument('--seed', type=int, default=10, help='Initializing random seed.')
-parser.add_argument('--dim_hidden_feature', type=int, default=256, help='dimensionality of hidden representation.')
+parser.add_argument('--dim_hidden_feature', type=int, default=512, help='dimensionality of hidden representation.')
 parser.add_argument("--epochs", default=800, help='Number of epochs to training.')
 parser.add_argument('--runs', type=int, default=2, help='Number of runs.')
-parser.add_argument('--learning_rate', '-lr', type=float, default=1e-3,
-                    help='Initializing learning rate chosen from [1e-3, 5e-3]')
+parser.add_argument('--learning_rate', '-lr', type=float, default=1e-2,
+                    help='Initializing learning rate chosen from [1e-3, 5e-3, 1e-2, 5e-2]')
 parser.add_argument('--weight_decay', type=float, default=1e-5, help='Initializing weight decay.')
 parser.add_argument('--gpu', default=0, type=int, help='GPU device idx.')
 
@@ -107,71 +107,53 @@ if __name__ == "__main__":
     # learning_rates = np.array([1e-3, 5e-3, 0.01, 0.05], dtype=np.float32)
     # dims_layers = np.array([512, 256, 128, 64], dtype=np.int32)
 
-    if args.dataset == "Cora":
-        learning_rates = np.array([1e-3], dtype=np.float32)
-        dims_layers = np.array([64], dtype=np.int32)
-
-    elif args.dataset == "Citeseer":
-        learning_rates = np.array([0.01], dtype=np.float32)
-        dims_layers = np.array([256], dtype=np.int32)
-
-    elif args.dataset == "Pubmed":
-        learning_rates = np.array([0.01], dtype=np.float32)
-        dims_layers = np.array([64], dtype=np.int32)
-
-    elif args.dataset == "Photo":
-        learning_rates = np.array([1e-3], dtype=np.float32)
-        dims_layers = np.array([512], dtype=np.int32)
-
-    elif args.dataset == "Computers":
-        learning_rates = np.array([5e-3], dtype=np.float32)
-        dims_layers = np.array([64], dtype=np.int32)
-
     for ratio_idx in range(len(ratios)):
         args.ratio = ratios[ratio_idx]
         train_data, val_data, test_data = T.RandomLinkSplit(num_val=args.ratio/2, num_test=args.ratio,
                                                             is_undirected=True,
                                                             split_labels=True,
                                                             add_negative_train_samples=True)(data)
+        train_data = train_data.to(device)
+        val_data = val_data.to(device)
+        test_data = test_data.to(device)
 
-        for lr_idx in range(learning_rates.shape[0]):
-            args.lr = learning_rates[lr_idx]
-            for dim_idx in range(dims_layers.shape[0]):
-                args.dim_feature = dims_layers[dim_idx]
-                for run in range(args.runs):
-                    edge_decoder = EdgeDecoder(args.dim_hidden_feature)
-                    model = CGCL(edge_decoder, data.num_features, args.dim_hidden_feature)
-                    model = model.to(device)
-                    model.reset_parameters()
+        # for lr_idx in range(learning_rates.shape[0]):
+        #     args.learning_rate = learning_rates[lr_idx]
+        #     for dim_idx in range(dims_layers.shape[0]):
+        #         args.dim_hidden_feature = dims_layers[dim_idx]
+        for run in range(args.runs):
+            edge_decoder = EdgeDecoder(args.dim_hidden_feature)
+            model = CGCL(edge_decoder, data.num_features, args.dim_hidden_feature)
+            model = model.to(device)
+            model.reset_parameters()
 
-                    optimizer = torch.optim.Adam(model.parameters(),
-                                                 lr=args.lr,
-                                                 weight_decay=args.weight_decay)
+            optimizer = torch.optim.Adam(model.parameters(),
+                                         lr=args.learning_rate,
+                                         weight_decay=args.weight_decay)
 
-                    for epoch in range(args.epochs):
-                        t1 = time.time()
-                        loss = train(epoch)
-                        t2 = time.time()
+            for epoch in range(args.epochs):
+                t1 = time.time()
+                loss = train(epoch)
+                t2 = time.time()
 
-                    results = test()
+            results = test()
 
-                    for key, result in results.items():
-                        valid_result, test_result = result
-                        print(key)
-                        print(f'--Testing on Run: {run + 1:02d}, '
-                              f'Valid: {valid_result:.2%}, '
-                              f'Test: {test_result:.2%}')
+            for key, result in results.items():
+                valid_result, test_result = result
+                print(key)
+                print(f'--Testing on Run: {run + 1:02d}, '
+                      f'Valid: {valid_result:.2%}, '
+                      f'Test: {test_result:.2%}')
 
-                    for key, result in results.items():
-                        loggers[key].add_result(run, result)
+            for key, result in results.items():
+                loggers[key].add_result(run, result)
 
-                print('--Final result')
-                for key in loggers.keys():
-                    print(key)
-                    mean_result, std_result = loggers[key].print_statistics()
+        print('--Final result')
+        for key in loggers.keys():
+            print(key)
+            mean_result, std_result = loggers[key].print_statistics()
 
-                    with open('final_mean_results_%s_%s.txt' % (args.dataset, args.ratio), 'a+') as f:
-                        f.write('{:.2f} \t {:.4f}  \t {} \t  {} \t {:.4f} \t {:.2f}'
-                                '\n'.format(args.ratio, args.lr, args.dim_feature, key, mean_result, std_result))
-                        f.flush()
-
+            with open('final_mean_results_%s_%s.txt' % (args.dataset, args.ratio), 'a+') as f:
+                f.write('{:.2f} \t {:.4f}  \t {} \t  {} \t {:.4f} \t {:.2f}'
+                        '\n'.format(args.ratio, args.lr, args.dim_feature, key, mean_result, std_result))
+                f.flush()
