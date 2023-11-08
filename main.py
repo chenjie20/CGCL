@@ -155,5 +155,5 @@ if __name__ == "__main__":
 
             with open('final_mean_results_%s_%s.txt' % (args.dataset, args.ratio), 'a+') as f:
                 f.write('{:.2f} \t {:.4f}  \t {} \t  {} \t {:.4f} \t {:.2f}'
-                        '\n'.format(args.ratio, args.lr, args.dim_feature, key, mean_result, std_result))
+                        '\n'.format(args.ratio, args.learning_rate, args.dim_feature, key, mean_result, std_result))
                 f.flush()
