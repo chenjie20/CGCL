@@ -109,8 +109,7 @@ data = transform(dataset[0])
 ratios = [0.1, 0.2]
 learning_rates = np.array([1e-3, 5e-3, 0.01, 0.05], dtype=np.float32)
 dims_layers = np.array([64, 128, 256, 512], dtype=np.int32)
-# learning_rates = np.array([0.01], dtype=np.float32)
-# dims_layers = np.array([512], dtype=np.int32)
+
 
 for ratio_idx in range(len(ratios)):
     args.ratio = ratios[ratio_idx]
