@@ -24,8 +24,8 @@ parser.add_argument('--dataset', type=str, default='Cora',
 parser.add_argument('--ratio', type=float, default=0.1, help='The ratio of testing edges dropped.')
 parser.add_argument('--seed', type=int, default=10, help='Initializing random seed.')
 parser.add_argument('--dim_hidden_feature', type=int, default=512, help='dimensionality of hidden representation.')
-parser.add_argument("--epochs", default=800, help='Number of epochs to training.')
-parser.add_argument('--runs', type=int, default=2, help='Number of runs.')
+parser.add_argument("--epochs", default=1000, help='Number of epochs to training.')
+parser.add_argument('--runs', type=int, default=10, help='Number of runs.')
 parser.add_argument('--learning_rate', '-lr', type=float, default=1e-2,
                     help='Initializing learning rate chosen from [1e-3, 5e-3, 1e-2, 5e-2]')
 parser.add_argument('--weight_decay', type=float, default=1e-5, help='Initializing weight decay.')
