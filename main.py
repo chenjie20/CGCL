@@ -5,7 +5,7 @@ import warnings
 
 import torch
 import torch_geometric.transforms as T
-from torch_geometric.utils import to_undirected, add_self_loops, negative_sampling
+from torch_geometric.utils import add_self_loops, negative_sampling
 
 
 from utils import *
@@ -25,6 +25,8 @@ parser.add_argument('--ratio', type=float, default=0.1, help='The ratio of testi
 parser.add_argument('--seed', type=int, default=10, help='Initializing random seed.')
 parser.add_argument('--dim_hidden_feature', type=int, default=512, help='dimensionality of hidden representation.')
 parser.add_argument("--epochs", default=1000, help='Number of epochs to training.')
+parser.add_argument("--min_epochs", default=800, help='Minimum number of epochs to training.')
+parser.add_argument('--patience', type=int, default=5, help='Patient epochs to wait before early stopping.')
 parser.add_argument('--runs', type=int, default=10, help='Number of runs.')
 parser.add_argument('--learning_rate', '-lr', type=float, default=1e-2,
                     help='Initializing learning rate chosen from [1e-3, 5e-3, 1e-2, 5e-2]')
@@ -32,13 +34,11 @@ parser.add_argument('--weight_decay', type=float, default=1e-5, help='Initializi
 parser.add_argument('--gpu', default=0, type=int, help='GPU device idx.')
 
 args = parser.parse_args()
-print("==========\nArgs:{}\n==========".format(args))
+assert args.min_epochs <= args.epochs, \
+    "The minimum number of epochs must be less than the number of epochs in the parameter setting. "
 
 torch.cuda.set_device(args.gpu)
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
-set_seed(args.seed)
-
 
 def train(epoch):
     model.train()
@@ -55,9 +55,7 @@ def train(epoch):
             num_neg_samples=edge_views[v_idx].view(2, -1).size(1),
         ).view_as(edge_views[v_idx])
 
-        edge_view_tmp = to_undirected(edge_views[idx])
-        edge_view_tmp = edge_view_tmp.to(device)
-        z = model(x, edge_view_tmp)
+        z = model(x, edge_views[idx])
         pos_out = model.edge_decoder(
             z, edge_views[v_idx], sigmoid=False
         )
@@ -78,8 +76,7 @@ def train(epoch):
 @torch.no_grad()
 def test():
     model.eval()
-    edge_index = to_undirected(train_data.edge_index)
-    z = model(train_data.x, edge_index)
+    z = model(train_data.x, train_data.edge_index)
 
     pos_pred = model.edge_decoder(z, val_data.pos_edge_label_index).squeeze().cpu()
     neg_pred = model.edge_decoder(z, val_data.neg_edge_label_index).squeeze().cpu()
@@ -94,68 +91,100 @@ def test():
     return all_results
 
 
-transform = T.Compose([
-    T.ToUndirected(),
-    T.ToDevice(device),
-])
-loggers = {
-    'AUC': Logger(args.runs, args),
-    'AP': Logger(args.runs, args),
-}
+if __name__ == '__main__':
 
-dataset = load_data(args.dataset)
-data = transform(dataset[0])
+    print("==========\nArgs:{}\n==========".format(args))
+    set_seed(args.seed)
 
-ratios = [0.1, 0.2]
-learning_rates = np.array([1e-3, 5e-3, 0.01, 0.05], dtype=np.float32)
-dims_layers = np.array([64, 128, 256, 512], dtype=np.int32)
+    transform = T.Compose([
+        T.ToUndirected(),
+        T.ToDevice(device),
+    ])
+    loggers = {
+        'AUC': Logger(args.runs, args),
+        'AP': Logger(args.runs, args),
+    }
 
+    save_path = './models/CGCL_pytorch_model_%s_%s.pth'
 
-for ratio_idx in range(len(ratios)):
-    args.ratio = ratios[ratio_idx]
-    train_data, val_data, test_data = T.RandomLinkSplit(num_val=args.ratio/2, num_test=args.ratio,
-                                                        is_undirected=True,
-                                                        split_labels=True,
-                                                        add_negative_train_samples=True)(data)
+    dataset = load_data(args.dataset)
+    data = transform(dataset[0])
 
-    for lr_idx in range(learning_rates.shape[0]):
-        args.learning_rate = learning_rates[lr_idx]
-        for dim_idx in range(dims_layers.shape[0]):
-            args.dim_hidden_feature = dims_layers[dim_idx]
-            for run in range(args.runs):
-                edge_decoder = EdgeDecoder(args.dim_hidden_feature)
-                model = CGCL(edge_decoder, data.num_features, args.dim_hidden_feature)
-                model = model.to(device)
-                model.reset_parameters()
+    ratios = [0.1, 0.2]
 
-                optimizer = torch.optim.Adam(model.parameters(),
-                                             lr=args.learning_rate,
-                                             weight_decay=args.weight_decay)
+    learning_rates = np.array([1e-3, 5e-3, 0.01, 0.05], dtype=np.float32)
+    dims_layers = np.array([1024, 512, 256, 128, 64], dtype=np.int32)
+    epochs_array = np.array([800, 1000], dtype=np.int32)
+    # learning_rates = np.array([1e-3], dtype=np.float32)
+    # dims_layers = np.array([128], dtype=np.int32)
+    # epochs_array = np.array([800], dtype=np.int32)
 
-                for epoch in range(args.epochs):
-                    t1 = time.time()
-                    loss = train(epoch)
-                    t2 = time.time()
+    for ratio_idx in range(len(ratios)):
+        args.ratio = ratios[ratio_idx]
+        train_data, val_data, test_data = T.RandomLinkSplit(num_val=args.ratio/2, num_test=args.ratio,
+                                                            is_undirected=True,
+                                                            split_labels=True,
+                                                            add_negative_train_samples=True)(data)
 
-                results = test()
+        for lr_idx in range(learning_rates.shape[0]):
+            args.lr = learning_rates[lr_idx]
+            for dim_idx in range(dims_layers.shape[0]):
+                args.dim_feature = dims_layers[dim_idx]
+                for epoch_idx in range(epochs_array.shape[0]):
+                    args.epochs = epochs_array[epoch_idx]
+                    for run in range(args.runs):
+                        edge_decoder = EdgeDecoder(args.dim_hidden_feature)
+                        model = CGCL(edge_decoder, data.num_features, args.dim_hidden_feature)
+                        model = model.to(device)
+                        model.reset_parameters()
 
-                for key, result in results.items():
-                    valid_result, test_result = result
-                    print(key)
-                    print(f'--Testing on Run: {run + 1:02d}, '
-                          f'Valid: {valid_result:.2%}, '
-                          f'Test: {test_result:.2%}')
+                        optimizer = torch.optim.Adam(model.parameters(),
+                                                     lr=args.lr,
+                                                     weight_decay=args.weight_decay)
 
-                for key, result in results.items():
-                    loggers[key].add_result(run, result)
+                        best_valid = 0.0
+                        best_epoch = 0
+                        num_waiting = 0
+                        for epoch in range(args.epochs):
+                            t1 = time.time()
+                            loss = train(epoch)
+                            t2 = time.time()
 
-            print('--Final result')
-            for key in loggers.keys():
-                print(key)
-                mean_result, std_result = loggers[key].print_statistics()
+                            if epoch >= (args.min_epochs-1) and (epoch+1) % 20 == 0:
+                                results = test()
+                                valid_result = results['AUC'][0]
+                                if valid_result > best_valid:
+                                    best_valid = valid_result
+                                    best_epoch = epoch
+                                    num_waiting = 0
+                                    torch.save(model.state_dict(), (save_path % (args.dataset, args.ratio)))
+                                else:
+                                    num_waiting += 1
+                                    if num_waiting >= args.patience:
+                                        print("Early stopping. Epoch:{0}".format(epoch))
+                                        break
 
-                with open('final_mean_results_%s_%s.txt' % (args.dataset, args.ratio), 'a+') as f:
-                    f.write('{:.2f} \t {:.4f}  \t {} \t {} \t  {} \t {:.4f} \t {:.2f}'
-                            '\n'.format(args.ratio, args.learning_rate, args.dim_hidden_feature, args.epochs, key, mean_result, std_result))
-                    f.flush()
+                        model.load_state_dict(torch.load(save_path % (args.dataset, args.ratio)))
+                        results = test()
+
+                        for key, result in results.items():
+                            valid_result, test_result = result
+                            print(key)
+                            print(f'--Testing on Run: {run + 1:02d}, '
+                                  f'Valid: {valid_result:.2%}, '
+                                  f'Test: {test_result:.2%}')
+
+                        for key, result in results.items():
+                            loggers[key].add_result(run, result)
+
+                    print('--Final result')
+                    for key in loggers.keys():
+                        print(key)
+                        mean_result, std_result = loggers[key].print_statistics()
+
+                        with open('final_mean_results_%s_%s.txt' % (args.dataset, args.ratio), 'a+') as f:
+                            f.write('{:.2f} \t {:.4f}  \t {} \t {} \t  {} \t {:.4f} \t {:.2f}'
+                                    '\n'.format(args.ratio, args.lr, args.dim_feature, args.epochs, key, mean_result, std_result))
+                            f.flush()
+
 
