@@ -6,7 +6,6 @@ from torch_geometric.nn import GCNConv, SAGEConv, GATConv, GINConv, GATv2Conv
 
 from utils import *
 
-
 class CGCL(nn.Module):
     def __init__(
             self,
